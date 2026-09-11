@@ -366,5 +366,5 @@ export async function route(pathname, query = {}, ctx = {}) {
     };
   }
 
-  return { status: 404, json: { error: 'not found' } };
+  return { status: 404, json: { error: 'not found', seen: clean } };
 }
