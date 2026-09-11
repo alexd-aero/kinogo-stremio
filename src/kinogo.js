@@ -173,7 +173,10 @@ function embedsFrom(html, pageUrl) {
   let m;
   while ((m = re.exec(html))) {
     const url = absolute(decodeEntities(m[1]), pageUrl);
-    if (url && !out.includes(url)) out.push(url);
+    // Posts also embed a trailer player. It resolves to a perfectly valid
+    // stream, which is precisely the problem: offered next to the real ones it
+    // is indistinguishable until you press play.
+    if (url && !/\/embed\/trailer\//i.test(url) && !out.includes(url)) out.push(url);
   }
   return out;
 }
