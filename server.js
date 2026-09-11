@@ -22,7 +22,10 @@ http
     }
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const query = Object.fromEntries(url.searchParams);
-    const { status, headers, body } = await handleRequest(url.pathname, query);
+    const { status, headers, body } = await handleRequest(url.pathname, query, {
+      host: req.headers.host,
+      proto: (req.headers['x-forwarded-proto'] || 'http').split(',')[0],
+    });
     res.writeHead(status, headers);
     res.end(body);
   })

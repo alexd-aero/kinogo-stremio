@@ -8,6 +8,7 @@ post's players expose.
 
 | Resource  | Behaviour |
 |-----------|-----------|
+| `/`       | Landing page with an install button, the manifest URL and a copy control. Stremio never reads it — it is there for humans. |
 | `catalog` | Two catalogs (`Kinogo Фильмы`, `Kinogo Сериалы`), each with search, genre filter and paging (12 per page, mapped onto DLE's own pagination). |
 | `meta`    | Title, poster, description, year, genres, cast, director, country, runtime, rating. Series get a full `videos` list. |
 | `stream`  | Resolves **all** embeds on a post and returns **every quality** each one exposes, sorted highest-first. |
@@ -79,8 +80,8 @@ docker run -d --name flaresolverr -p 8191:8191 \
   --restart unless-stopped ghcr.io/flaresolverr/flaresolverr:latest
 ```
 
-Add to Stremio: paste the `manifest.json` URL into Stremio's *Addons → Add
-addon* box.
+Add to Stremio: open <http://localhost:7000/> and hit **Установить в Stremio**,
+or paste the `manifest.json` URL into Stremio's *Addons → Add addon* box.
 
 ## Deploying to Vercel
 
@@ -139,7 +140,8 @@ src/addon.js    Stremio protocol: manifest, catalog, meta, stream
 src/kinogo.js   site adapter: mirrors, search, browse, detail
 src/players.js  embed resolution, quality parsing, season/episode trees
 src/fetch.js    direct → FlareSolverr escalation, proxy, cookie reuse
-src/handler.js  shared CORS/JSON wrapper
+src/handler.js  shared CORS/JSON/HTML wrapper
+src/landing.js  root install page
 src/html.js     entity decoding, tag stripping, JSON-LD
 src/cache.js    TTL cache
 ```

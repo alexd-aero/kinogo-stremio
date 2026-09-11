@@ -9,18 +9,18 @@ const CORS = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 };
 
-export async function handleRequest(pathname, query) {
+export async function handleRequest(pathname, query, ctx = {}) {
   try {
-    const { status, json } = await route(pathname, query);
+    const { status, json, html } = await route(pathname, query, ctx);
     const cacheable = status === 200 && !pathname.includes('/debug/');
     return {
       status,
       headers: {
         ...CORS,
-        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Type': html ? 'text/html; charset=utf-8' : 'application/json; charset=utf-8',
         'Cache-Control': cacheable ? 'public, max-age=300, stale-while-revalidate=600' : 'no-store',
       },
-      body: JSON.stringify(json),
+      body: html ?? JSON.stringify(json),
     };
   } catch (err) {
     console.error('[addon]', pathname, err);

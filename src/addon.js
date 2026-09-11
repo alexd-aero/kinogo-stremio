@@ -286,10 +286,20 @@ function parseExtra(raw = '') {
 }
 
 // Returns { status, json } for any addon path.
-export async function route(pathname, query = {}) {
+export async function route(pathname, query = {}, ctx = {}) {
   const clean = decodeURIComponent(pathname).replace(/^\/+|\/+$/g, '');
 
-  if (clean === '' || clean === 'manifest.json') return { status: 200, json: MANIFEST };
+  // Root is a human landing page; Stremio itself only ever reads the manifest.
+  // Imported lazily because landing.js reads MANIFEST from this module.
+  if (clean === '') {
+    const { landingPage } = await import('./landing.js');
+    return {
+      status: 200,
+      html: landingPage({ host: ctx.host || 'localhost', proto: ctx.proto || 'http' }),
+    };
+  }
+
+  if (clean === 'manifest.json') return { status: 200, json: MANIFEST };
 
   const parts = clean.split('/');
 
