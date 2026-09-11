@@ -8,8 +8,16 @@ export default async function handler(req, res) {
   }
 
   const url = new URL(req.url, `https://${req.headers.host || 'localhost'}`);
+
+  // vercel.json rewrites every request to this function, which replaces the
+  // URL the function sees — req.url would be "/api/index". The rewrite carries
+  // the original path in __path so the router still gets the real route.
+  const forwarded = url.searchParams.get('__path');
+  const pathname = forwarded === null ? url.pathname : `/${forwarded}`;
+
   const query = Object.fromEntries(url.searchParams);
-  const { status, headers, body } = await handleRequest(url.pathname, query, {
+  delete query.__path;
+  const { status, headers, body } = await handleRequest(pathname, query, {
     host: req.headers.host,
     proto: (req.headers['x-forwarded-proto'] || 'https').split(',')[0],
   });
