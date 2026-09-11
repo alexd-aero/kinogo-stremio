@@ -23,5 +23,12 @@ export default async function handler(req, res) {
   });
 
   for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+
+  // Vercel's rewrite layer is opaque from the outside; these make the routing
+  // inputs visible on every response without needing a working route.
+  res.setHeader('X-Debug-Raw-Url', String(req.url).slice(0, 200));
+  res.setHeader('X-Debug-Pathname', pathname.slice(0, 200));
+  res.setHeader('X-Debug-Forwarded', forwarded === null ? 'null' : forwarded.slice(0, 120));
+
   res.status(status).send(body);
 }
