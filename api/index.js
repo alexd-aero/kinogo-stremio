@@ -12,7 +12,11 @@ export default async function handler(req, res) {
   // vercel.json rewrites every request to this function, which replaces the
   // URL the function sees — req.url would be "/api/index". The rewrite carries
   // the original path in __path so the router still gets the real route.
-  const forwarded = url.searchParams.get('__path');
+  // A rewrite placeholder that never got interpolated (":path*", "$1") means
+  // the vercel.json syntax is wrong — treat it as absent rather than routing
+  // to a literal "/$1" and returning a confusing 404.
+  const raw = url.searchParams.get('__path');
+  const forwarded = raw !== null && /^[$:]/.test(raw) ? null : raw;
   const pathname = forwarded === null ? url.pathname : `/${forwarded}`;
 
   const query = Object.fromEntries(url.searchParams);
