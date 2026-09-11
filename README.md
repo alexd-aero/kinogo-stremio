@@ -65,6 +65,33 @@ and UA are then reused for ~20 minutes.
 | `CACHE_TTL` | `900` | Seconds for search/browse/detail caching. |
 | `PORT` / `HOST` | `7000` / `0.0.0.0` | Standalone server only. |
 
+## Self-hosting on the Pi (primary deployment)
+
+Runs as two systemd units, both enabled so they survive a reboot:
+
+| Unit | Role |
+|---|---|
+| `kinogo-addon.service` | the Node server on `127.0.0.1:7000` |
+| `cloudflared-kinogo.service` | named tunnel → `https://kinogo-strmio.alexaero.dev` |
+
+The tunnel has its own config (`~/.cloudflared/kinogo.yml`) and its own
+service, deliberately separate from the `mailhook` and `pi-vpn` tunnels so
+restarting this one never disturbs those.
+
+```bash
+./run.sh     # start both units, re-arm them for boot, wait for a 200
+./kill.sh    # stop both and keep them down across reboots
+```
+
+`run.sh` polls the public URL and fails loudly if it does not answer within
+~60s. `kill.sh` disables rather than just stopping, so a reboot will not
+resurrect what you deliberately took down.
+
+Note on DNS: `cloudflared tunnel route dns` reads the *default* `config.yml`
+and will attach the CNAME to whatever tunnel that names. Pass
+`--config ~/.cloudflared/kinogo.yml` or the record will point at the wrong
+tunnel.
+
 ## Running locally
 
 ```bash
