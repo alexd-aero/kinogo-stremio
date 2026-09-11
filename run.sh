@@ -4,7 +4,8 @@
 set -u
 URL="https://kinogo-strmio.alexaero.dev/manifest.json"
 
-sudo systemctl enable --now kinogo-addon.service cloudflared-kinogo.service
+sudo systemctl enable --now kinogo-vpn.service tinyproxy.service \
+  kinogo-addon.service cloudflared-kinogo.service
 
 echo "waiting for the tunnel to come up..."
 for i in $(seq 1 20); do

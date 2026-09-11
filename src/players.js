@@ -81,6 +81,97 @@ export function pickFromPlaylist(playlist, season, episode) {
   return found;
 }
 
+// Collaps-style players (api.ortified.ws and friends) do not use a Playerjs
+// `file` string. They inline a JS options object whose playlist looks like:
+//
+//   playlist: { current: { season: 4, episode: "1" },
+//               seasons: [ { season: 3, episodes: [ { episode: "1",
+//                            hls: "…master.m3u8", dash: "…mpd" } ] } ] }
+//
+// Without parsing that, the generic URL scrape returns every episode in the
+// series for a single-episode request.
+function sliceBalanced(text, start, open = '[', close = ']') {
+  let depth = 0;
+  let inStr = null;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (c === '\\') i++;
+      else if (c === inStr) inStr = null;
+      continue;
+    }
+    if (c === '"' || c === "'") inStr = c;
+    else if (c === open) depth++;
+    else if (c === close && --depth === 0) return text.slice(start, i + 1);
+  }
+  return null;
+}
+
+export function extractSeasonTree(html) {
+  const m = /seasons\s*:\s*\[/.exec(html);
+  if (!m) return null;
+  const raw = sliceBalanced(html, html.indexOf('[', m.index));
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+
+  return parsed
+    .map((s) => ({
+      season: Number(s.season),
+      episodes: (s.episodes || [])
+        .map((e) => ({
+          episode: Number(e.episode),
+          hls: typeof e.hls === 'string' ? e.hls : null,
+          dash: typeof e.dash === 'string' ? e.dash : null,
+        }))
+        .filter((e) => Number.isFinite(e.episode))
+        .sort((a, b) => a.episode - b.episode),
+    }))
+    .filter((s) => Number.isFinite(s.season))
+    .sort((a, b) => a.season - b.season);
+}
+
+// Which season/episode the embed itself selected, used when the caller did not
+// pin one down.
+function currentSelection(html) {
+  const m = /current\s*:\s*\{([\s\S]{0,160}?)\}/.exec(html);
+  if (!m) return {};
+  const season = /season\s*:\s*"?(\d+)"?/.exec(m[1]);
+  const episode = /episode\s*:\s*"?(\d+)"?/.exec(m[1]);
+  return {
+    season: season ? Number(season[1]) : null,
+    episode: episode ? Number(episode[1]) : null,
+  };
+}
+
+export function pickFromSeasonTree(html, season, episode) {
+  const tree = extractSeasonTree(html);
+  if (!tree?.length) return null;
+
+  const cur = currentSelection(html);
+  const wantSeason = season ?? cur.season;
+  const wantEpisode = episode ?? cur.episode;
+
+  const s =
+    tree.find((x) => x.season === Number(wantSeason)) ?? (wantSeason == null ? tree[0] : null);
+  if (!s) return [];
+
+  const e =
+    s.episodes.find((x) => x.episode === Number(wantEpisode)) ??
+    (wantEpisode == null ? s.episodes[0] : null);
+  if (!e) return [];
+
+  const out = [];
+  if (e.hls) out.push({ url: e.hls, quality: '' });
+  if (e.dash) out.push({ url: e.dash, quality: 'dash' });
+  return out;
+}
+
 function extractPlaylist(html) {
   // `file:` may hold a JSON array (series) or a quality string (movie).
   const candidates = [];
@@ -92,11 +183,30 @@ function extractPlaylist(html) {
 
 function collectDirect(html) {
   const out = [];
-  const re = /https?:\\?\/\\?\/[^\s"'<>\\]+?\.(?:m3u8|mp4)(?:\?[^\s"'<>\\]*)?/gi;
-  let m;
-  while ((m = re.exec(html))) {
-    const url = m[0].replace(/\\\//g, '/');
-    if (!out.some((s) => s.url === url)) out.push({ url, quality: '' });
+  // The extension must end the path: these CDNs serve HLS from paths like
+  // ".../NAME.mp4/master.m3u8", where a lazy match on ".mp4" would truncate the
+  // URL to a directory and yield an unplayable link.
+  const re = /https?:\\?\/\\?\/[^\s"'<>\\]+?\.(?:m3u8|mp4)(?![\w/]|%[0-9A-Fa-f]{2})(?:\?[^\s"'<>\\]*)?/gi;
+
+  // Players often carry the real URL percent-encoded inside a redirector's
+  // query string, where the pattern above would stop at the first "%2F" and
+  // yield a directory rather than a playlist. Scanning a decoded copy as well
+  // recovers the inner URL intact; duplicates collapse below.
+  const haystacks = [html];
+  try {
+    const decoded = decodeURIComponent(html.replace(/%(?![0-9A-Fa-f]{2})/g, '%25'));
+    if (decoded !== html) haystacks.push(decoded);
+  } catch {
+    /* malformed escapes — the raw pass still applies */
+  }
+
+  for (const hay of haystacks) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(hay))) {
+      const url = m[0].replace(/\\\//g, '/');
+      if (!out.some((s) => s.url === url)) out.push({ url, quality: '' });
+    }
   }
   return out;
 }
@@ -129,6 +239,15 @@ async function resolveOne(embedUrl, { referer, season, episode, depth = 0 }) {
   }
 
   const sources = [];
+
+  // Season/episode aware extraction first: the generic scrape below cannot
+  // tell one episode's URLs from another's.
+  const picked = pickFromSeasonTree(body, season, episode);
+  if (picked?.length) {
+    const host0 = new URL(url).hostname;
+    return { host: host0, geoBlocked: false, sources: picked, status: r.status };
+  }
+
   for (const raw of extractPlaylist(body)) {
     let value = raw;
     if (/^["']/.test(raw)) {
@@ -245,6 +364,19 @@ export async function getPlaylistTree(item) {
         try {
           const r = await siteFetch(embed, { referer: item.url, timeout: 25000 });
           if (!r.body || isGeoBlocked(r.body)) continue;
+
+          // Preferred: the Collaps season/episode map, which is exact.
+          const collaps = extractSeasonTree(r.body);
+          if (collaps?.length) {
+            const tree = collaps
+              .filter((s) => s.episodes.length)
+              .map((s) => ({
+                season: s.season,
+                episodes: s.episodes.map((e) => ({ episode: e.episode, title: `${e.episode} серия` })),
+              }));
+            if (tree.length) return tree;
+          }
+
           for (const raw of extractPlaylist(r.body)) {
             if (!raw.trim().startsWith('[')) continue;
             try {

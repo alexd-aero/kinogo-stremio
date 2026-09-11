@@ -34,6 +34,39 @@ Episode lists come from the player's own playlist when it is reachable — that
 is the only authoritative season→episode map. When it is not, the addon falls
 back to the title's season range and the page's `numberOfEpisodes`.
 
+## How the geo-block is solved
+
+Two opposite constraints, which is why routing is decided per host:
+
+* the **players** (`api.ortified.ws`, `*.stravers.live`) are geo-locked to
+  RU/CIS and answer `видео недоступно для вашего региона` from anywhere else;
+* the **site** is blocked *inside* Russia by Roskomnadzor — from a Russian exit
+  `kinogo.la` times out even on `robots.txt`.
+
+So: site pages go out directly, player embeds go through a Russian exit, and
+the resulting stream URLs are handed to Stremio untouched — the CDNs
+(`cdnr.interkh.com` and friends) are **not** geo-locked and serve the same 200
+from anywhere. No stream proxying is needed, and playback does not depend on
+this machine staying up.
+
+The Russian exit is a VPN Gate OpenVPN endpoint run as `kinogo-vpn.service`
+with `--route-nopull`, so it never becomes the default route. Selection is by
+firewall mark rather than address, because VPN Gate hands out a new tunnel
+address on every reconnect:
+
+```
+tinyproxy (uid) --iptables MARK 0x64--> ip rule --> table 100 --> tun10
+```
+
+`netsetup.sh` installs those rules before OpenVPN starts (none of it survives a
+reboot on its own), including a MASQUERADE on `tun10` — the socket picks its
+source address before the mark reroutes it, so without that the packets leave
+the tunnel wearing the LAN address and the server drops them — and an MSS clamp,
+without which large pages stall while small ones succeed.
+
+`PROXY_URL` points at that proxy; `src/fetch.js` applies it only to non-mirror
+hosts.
+
 ## Requirements and constraints
 
 **The players are geo-locked to RU/CIS.** From anywhere else both balancers
@@ -71,6 +104,8 @@ Runs as two systemd units, both enabled so they survive a reboot:
 
 | Unit | Role |
 |---|---|
+| `kinogo-vpn.service` | OpenVPN to a Russian exit, split-tunnelled |
+| `tinyproxy.service` | local proxy whose egress is that tunnel |
 | `kinogo-addon.service` | the Node server on `127.0.0.1:7000` |
 | `cloudflared-kinogo.service` | named tunnel → `https://kinogo-strmio.alexaero.dev` |
 

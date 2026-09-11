@@ -25,6 +25,43 @@ async function getDispatcher() {
   return dispatcher;
 }
 
+// The two ends of this pipeline want opposite exits, so the proxy is chosen
+// per host rather than globally:
+//
+//   kinogo mirrors  -> direct. The site is blocked by Roskomnadzor, so a
+//                      Russian exit cannot reach it at all (it times out even
+//                      on robots.txt).
+//   everything else -> proxied. The players are geo-locked to RU/CIS and their
+//                      embed domains rotate, so allow-listing them is futile;
+//                      anything that is not the site is treated as a player.
+//
+// Stream URLs are handed to Stremio untouched: the CDNs themselves are not
+// geo-locked, so playback works from the viewer's own connection.
+function isSiteHost(url) {
+  let host;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (/(^|\.)kinogo/i.test(host)) return true;
+  return (process.env.KINOGO_MIRRORS || '')
+    .split(',')
+    .map((m) => {
+      try {
+        return new URL(m.trim()).hostname.toLowerCase();
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean)
+    .includes(host);
+}
+
+export function shouldProxy(url) {
+  return Boolean(env('PROXY_URL')) && !isSiteHost(url);
+}
+
 // Per-origin browser identity handed back by FlareSolverr.
 const identities = new Map(); // origin -> { cookie, userAgent, at }
 const IDENTITY_TTL = 20 * 60 * 1000;
@@ -88,8 +125,10 @@ async function plainFetch(url, { referer, timeout = 20000, headers = {} } = {}) 
       redirect: 'follow',
       signal: ctrl.signal,
     };
-    const d = await getDispatcher();
-    if (d) opts.dispatcher = d;
+    if (shouldProxy(url)) {
+      const d = await getDispatcher();
+      if (d) opts.dispatcher = d;
+    }
     const res = await fetch(url, opts);
     const body = await res.text();
     return { status: res.status, body, url: res.url, via: 'direct' };
@@ -108,7 +147,7 @@ async function flareFetch(url, { timeout = 60000 } = {}) {
     maxTimeout: Math.max(20000, timeout - 5000),
   };
   const proxy = env('PROXY_URL');
-  if (proxy) payload.proxy = { url: proxy };
+  if (proxy && shouldProxy(url)) payload.proxy = { url: proxy };
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeout);
