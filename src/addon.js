@@ -244,7 +244,32 @@ function streamEntry(s, item) {
   };
 }
 
+// Stream resolution is the one resource that needs a Russian exit, and a
+// serverless platform cannot host a VPN. Where UPSTREAM_URL is set (i.e. on
+// Vercel) that single resource is delegated to an instance that has one; the
+// catalogs and metadata are still served locally, and a failed delegation
+// falls through to local resolution so the region notice still explains itself.
+async function delegateStream(type, id) {
+  const upstream = (process.env.UPSTREAM_URL || '').trim().replace(/\/+$/, '');
+  if (!upstream) return null;
+  try {
+    const res = await fetch(`${upstream}/stream/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(22000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data?.streams) && data.streams.length ? data : null;
+  } catch (e) {
+    console.warn('[upstream] stream delegation failed:', e.message);
+    return null;
+  }
+}
+
 async function handleStream(type, id) {
+  const delegated = await delegateStream(type, id);
+  if (delegated) return delegated;
+
   const parts = id.split(':');
   let postId = null;
   let season = null;
