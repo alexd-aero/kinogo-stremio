@@ -2,6 +2,7 @@
 
 import { CATEGORIES, search, browse, detail, splitTitle, pMap } from './kinogo.js';
 import { resolveStreams, getPlaylistTree } from './players.js';
+import { UA_FALLBACK } from './fetch.js';
 import { cached } from './cache.js';
 
 const PAGE_SIZE = 12; // one DLE listing page
@@ -226,10 +227,18 @@ function streamEntry(s, item) {
     title: `${displayName(item)}\n${s.host}`,
     url: s.url,
     behaviorHints: {
-      notWebReady: !/\.m3u8/i.test(s.url) ? false : true,
+      // The CDN answers 410 Gone to any request without a browser User-Agent —
+      // Referer and Origin are ignored entirely. Playback therefore has to go
+      // through Stremio's streaming server, since that is what applies
+      // proxyHeaders; playing the URL directly gets 410 on every segment and
+      // shows as an endless spinner.
+      notWebReady: true,
       bingeGroup: `kinogo-${item.postId}-${quality}`,
       proxyHeaders: {
-        request: { Referer: item.url, Origin: new URL(item.url).origin },
+        request: {
+          'User-Agent': UA_FALLBACK,
+          Referer: item.url,
+        },
       },
     },
   };
